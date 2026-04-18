@@ -1,4 +1,4 @@
-hereimport telebot
+import telebot
 from telebot.types import ReplyKeyboardMarkup
 from config import TOKEN
 from database import add_user,get_user
