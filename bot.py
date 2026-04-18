@@ -1,192 +1,151 @@
 import telebot
 import os
-import sqlite3
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-
-# ================= CONFIG =================
+from database import cursor,conn
+from dashboard import dashboard_menu
+from trading import start_session
+from telebot.types import ReplyKeyboardMarkup
+import threading
 
 TOKEN=os.getenv("BOT_TOKEN")
-
 bot=telebot.TeleBot(TOKEN)
 
-# ================= DATABASE =================
+waiting_register={}
+waiting_login={}
 
-conn=sqlite3.connect("users.db",check_same_thread=False)
-cursor=conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-telegram_id INTEGER UNIQUE,
-email TEXT
-)
-""")
-conn.commit()
-
-# ================= MENUS =================
-
-def about_menu():
-    markup=ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("Register","Login")
-    return markup
-
-def back_menu():
-    markup=ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("⬅ Back")
-    return markup
-
-def dashboard_menu():
-    markup=ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("Demo Account","Real Account")
-    markup.row("Deposit")
-    markup.row("Start Trade Demo","Start Trade Real")
-    markup.row("⬅ Back")
-    return markup
-
-# ================= START =================
+# ================= ABOUT SCREEN =================
 
 @bot.message_handler(commands=['start'])
 def start(message):
 
     text="""
-🤖 AUTO TRADING BOT
+💎 Welcome to AUTOBOT | AI TRADE
 
-Welcome Trader!
+AI Trading Bot for Pocket Option
 
-✅ Automatic OTC Trading
-✅ Buy / Sell Bot
+✅ Fully Automatic
+✅ OTC Trading
 ✅ Martingale System
-✅ Works 24/7
+✅ 24/7 Cloud Trading
 
-Choose option below:
+Choose option:
 """
 
-    bot.send_message(
-        message.chat.id,
-        text,
-        reply_markup=about_menu()
-    )
+    menu=ReplyKeyboardMarkup(resize_keyboard=True)
+    menu.row("Registration","Login")
+
+    bot.send_message(message.chat.id,text,reply_markup=menu)
 
 # ================= REGISTER =================
 
-waiting_register={}
-
-@bot.message_handler(func=lambda m: m.text=="Register")
+@bot.message_handler(func=lambda m:m.text=="Registration")
 def register(message):
 
     waiting_register[message.chat.id]=True
 
-    bot.send_message(
-        message.chat.id,
-        "📧 Enter Email to Register:",
-        reply_markup=back_menu()
-    )
+    back=ReplyKeyboardMarkup(resize_keyboard=True)
+    back.row("Back")
+
+    bot.send_message(message.chat.id,"📧 Send your Email:",reply_markup=back)
 
 # ================= LOGIN =================
 
-waiting_login={}
-
-@bot.message_handler(func=lambda m: m.text=="Login")
+@bot.message_handler(func=lambda m:m.text=="Login")
 def login(message):
 
     waiting_login[message.chat.id]=True
 
-    bot.send_message(
-        message.chat.id,
-        "🔐 Enter Email to Login:",
-        reply_markup=back_menu()
-    )
+    back=ReplyKeyboardMarkup(resize_keyboard=True)
+    back.row("Back")
+
+    bot.send_message(message.chat.id,"🔐 Enter Email:",reply_markup=back)
 
 # ================= BACK =================
 
-@bot.message_handler(func=lambda m: m.text=="⬅ Back")
+@bot.message_handler(func=lambda m:m.text=="Back")
 def back(message):
     start(message)
 
-# ================= EMAIL HANDLER =================
+# ================= EMAIL INPUT =================
 
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
+@bot.message_handler(func=lambda message:True)
+def handler(message):
 
     chat_id=message.chat.id
-    email=message.text
+    text=message.text
 
-    # ---------- REGISTER ----------
-
+    # REGISTER
     if waiting_register.get(chat_id):
 
-        try:
-            cursor.execute(
-                "INSERT INTO users(telegram_id,email) VALUES(?,?)",
-                (chat_id,email)
-            )
-            conn.commit()
-
-            bot.send_message(
-                chat_id,
-                "✅ Registration Successful!",
-                reply_markup=dashboard_menu()
-            )
-
-        except:
-            bot.send_message(
-                chat_id,
-                "❌ Account already exists."
-            )
+        cursor.execute(
+            "INSERT OR REPLACE INTO users(telegram_id,email) VALUES(?,?)",
+            (chat_id,text)
+        )
+        conn.commit()
 
         waiting_register.pop(chat_id,None)
+
+        bot.send_message(
+            chat_id,
+            "✅ Account Created!",
+            reply_markup=dashboard_menu()
+        )
         return
 
-    # ---------- LOGIN ----------
-
+    # LOGIN
     if waiting_login.get(chat_id):
 
         cursor.execute(
             "SELECT * FROM users WHERE email=?",
-            (email,)
+            (text,)
         )
 
         user=cursor.fetchone()
 
-        if user:
-            bot.send_message(
-                chat_id,
-                "✅ Login Successful!",
-                reply_markup=dashboard_menu()
-            )
-        else:
-            bot.send_message(
-                chat_id,
-                "❌ Account not found."
-            )
-
         waiting_login.pop(chat_id,None)
+
+        if user:
+            bot.send_message(chat_id,"✅ Login Success",reply_markup=dashboard_menu())
+        else:
+            bot.send_message(chat_id,"❌ Account Not Found")
         return
 
+# ================= DASHBOARD =================
 
-# ================= DASHBOARD BUTTONS =================
-
-@bot.message_handler(func=lambda m: m.text=="Demo Account")
+@bot.message_handler(func=lambda m:m.text=="🚀 Start Demo")
 def demo(message):
-    bot.send_message(message.chat.id,"💰 Demo Balance: $10000")
 
-@bot.message_handler(func=lambda m: m.text=="Real Account")
+    bot.send_message(message.chat.id,"🚀 Demo Trading Started")
+
+    threading.Thread(
+        target=start_session,
+        args=(bot,message.chat.id,1)
+    ).start()
+
+@bot.message_handler(func=lambda m:m.text=="💼 Start Real")
 def real(message):
-    bot.send_message(message.chat.id,"💵 Real Balance: $0")
 
-@bot.message_handler(func=lambda m: m.text=="Deposit")
+    bot.send_message(message.chat.id,"🔥 Real Trading Started")
+
+    threading.Thread(
+        target=start_session,
+        args=(bot,message.chat.id,1)
+    ).start()
+
+@bot.message_handler(func=lambda m:m.text=="💳 Deposit")
 def deposit(message):
-    bot.send_message(message.chat.id,"🔗 Deposit via Pocket Option")
+    bot.send_message(message.chat.id,"🔗 Deposit Link")
 
-@bot.message_handler(func=lambda m: m.text=="Start Trade Demo")
-def trade_demo(message):
-    bot.send_message(message.chat.id,"🚀 Demo Auto Trading Starting...")
+@bot.message_handler(func=lambda m:m.text=="👤 Profile")
+def profile(message):
+    bot.send_message(message.chat.id,"👤 User Profile")
 
-@bot.message_handler(func=lambda m: m.text=="Start Trade Real")
-def trade_real(message):
-    bot.send_message(message.chat.id,"🔥 Real Auto Trading Starting...")
+@bot.message_handler(func=lambda m:m.text=="👥 Referrals")
+def ref(message):
+    bot.send_message(message.chat.id,"👥 Referral System")
 
-# ================= RUN =================
+@bot.message_handler(func=lambda m:m.text=="💬 Manager")
+def manager(message):
+    bot.send_message(message.chat.id,"Manager Online ✅")
 
-print("BOT RUNNING...")
+print("AUTOBOT RUNNING...")
 bot.infinity_polling()
